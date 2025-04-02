@@ -1,0 +1,9 @@
+# python cache
+__pycache__/
+
+#results
+runs/
+results/
+
+#temporary files
+temp/
