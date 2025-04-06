@@ -1,12 +1,23 @@
 import numpy as np
 from scipy.signal import butter, lfilter
 
-def masking(x, mask_rate=0.1):
+def dropout(x, mask_rate=0.1):
     mask = np.random.binomial(1, 1-mask_rate, x.shape)
     return x * mask
 
 def jitter(x, sigma=0.8):
     return x + np.random.normal(loc=0., scale=sigma, size=x.shape)
+
+def gaussian_noise(x, sigma=0.1):
+    noise = np.random.normal(loc=0., scale=sigma, size=x.shape)
+    return x + noise
+
+def mask(x, mask_ratio=0.1):
+    start = np.random.randint(0, x.shape[-1] - int(mask_ratio * x.shape[-1]))
+    end = start + int(mask_ratio * x.shape[-1])
+    x[..., start:end] = 0
+    return x
+
 
 def freuqency_perturbation(f, fs, alpha=2):
     n = np.linspace(1,fs,len(f))
@@ -42,7 +53,7 @@ class FreqencyAugumentation:
     def __call__(self, x):
         x = self._frequency_perturbation(x)
         x = self._frequency_masking(x)
-        x = masking(x, mask_rate=0.3)
+        x = dropout(x, mask_rate=0.3)
         return x
     
 class TimeAugumentation:
@@ -72,7 +83,7 @@ class TimeAugumentation:
         b, a = coeffs
         return lfilter(b, a, x)
     
-    def _masking(self, x):
+    def _dropout(self, x):
         mask = np.random.binomial(1, 1-self.mask_rate, x.shape[-1])
         return x * mask
     
@@ -82,6 +93,6 @@ class TimeAugumentation:
     def __call__(self, x):
         #filter_coeff = np.random.choice(list(self.filters.keys()))
         #x = self._BandStopFilter(x, self.filters[filter_coeff])
-        x = self._masking(x)
+        x = self._dropout(x)
         x = self._jitter(x)
         return x
