@@ -18,21 +18,12 @@ def mask(x, mask_ratio=0.1):
     x[..., start:end] = 0
     return x
 
-
-def freuqency_perturbation(f, fs, alpha=2):
-    n = np.linspace(1,fs,len(f))
-    mean_amplitude = np.mean(f)
-    noise_amplitude = mean_amplitude/np.power(n,alpha)
-    noise = np.random.normal(0, 1, len(f))
-    f = f + noise_amplitude * noise
-    return abs(f)
-
-
 class FreqencyAugumentation:
-    def __init__(self, fs, mask_resolution, fft_resolution = 0.1):
+    def __init__(self, fs, masked_freq, fft_resolution = 0.1, dropout_rate=0.3):
         self.fs = fs
-        self.max_resolution = mask_resolution
+        self.masked_freq = masked_freq
         self.fft_resolution = fft_resolution
+        self.dropout_rate = dropout_rate
 
     def _frequency_perturbation(self, f):
         mean_amplitude = np.mean(f, axis=-1)
@@ -45,15 +36,21 @@ class FreqencyAugumentation:
     
     def _frequency_masking(self, f):
         high_cutoff = int(0.5 *  f.shape[-1])
-        max_mask_length =int( self.max_resolution / self.fft_resolution )
+        max_mask_length =int( self.masked_freq / self.fft_resolution )
         mask_start = np.random.randint(0,  high_cutoff - max_mask_length)
         f[..., mask_start:mask_start + max_mask_length] = 0
         return f
+    
+    def _dropout(self, f):
+        mask = np.random.binomial(1, 1-self.dropout_rate, f.shape[-1])
+        return f * mask
         
-    def __call__(self, x):
-        x = self._frequency_perturbation(x)
-        x = self._frequency_masking(x)
-        x = dropout(x, mask_rate=0.3)
+    def __call__(self, x, perturbation=True, masking=True):
+        if perturbation:
+            x = self._frequency_perturbation(x)
+        if masking:
+            x = self._frequency_masking(x)
+            x = dropout(x, mask_rate=self.dropout_rate)
         return x
     
 class TimeAugumentation:
@@ -76,12 +73,12 @@ class TimeAugumentation:
         nyquist = 0.5 * fs
         low = cutoffs[0] / nyquist
         high = cutoffs[1] / nyquist
-        b, a = butter(5, [low, high], btype='bandstop')
+        b, a = butter(2, [low, high], btype='bandstop', analog=False)
         return b, a
     
     def _BandStopFilter(self, x, coeffs):
         b, a = coeffs
-        return lfilter(b, a, x)
+        return lfilter(b, a, x,axis=-1)
     
     def _dropout(self, x):
         mask = np.random.binomial(1, 1-self.mask_rate, x.shape[-1])
@@ -90,9 +87,13 @@ class TimeAugumentation:
     def _jitter(self, x):
         return x + np.random.normal(loc=0., scale=self.sigma, size=x.shape[-1])
 
-    def __call__(self, x):
-        #filter_coeff = np.random.choice(list(self.filters.keys()))
-        #x = self._BandStopFilter(x, self.filters[filter_coeff])
-        x = self._dropout(x)
-        x = self._jitter(x)
+    def __call__(self, x, bandstop=True, dropout=True, jitter=True):
+        if bandstop:
+            filter_coeff = np.random.choice(list(self.filters.keys()))
+            x = self._BandStopFilter(x, self.filters[filter_coeff])
+        if dropout:
+            x = self._dropout(x)
+            x = mask(x, mask_ratio=self.mask_rate)
+        if jitter:
+            x = self._jitter(x)
         return x

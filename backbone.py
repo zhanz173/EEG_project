@@ -3,6 +3,7 @@
 import torch
 import torch.nn as nn
 from torch.nn import TransformerEncoder, TransformerEncoderLayer
+import numpy as np
 
 # 1D postional encoding
 class PositionalEncoding(nn.Module):
@@ -36,11 +37,11 @@ class ConvBlock(nn.Module):
         return x
 
 class ConvEncoder(nn.Module):
-    def __init__(self, in_channels, kernel_size:list, embeding_size:int, stride:int, padding:int):
+    def __init__(self, in_channels, kernel_size:list, embeding_size:int):
         super(ConvEncoder, self).__init__()
         self.conv_block = []
         for i in range(len(kernel_size)):
-            self.conv_block.append(ConvBlock(in_channels, embeding_size, kernel_size[i], stride, padding))
+            self.conv_block.append(ConvBlock(in_channels, embeding_size, kernel_size[i], (kernel_size[i]+1)//2, (kernel_size[i]-1)//2))
             in_channels = embeding_size
         self.conv_block = nn.Sequential(*self.conv_block)
 
@@ -96,16 +97,33 @@ class EEGTransformerEncoder(nn.Module):
     Returns: x
     - **x** (batch, time, dim): Tensor produces by EEG Transformer model
     """
-    def __init__(self, in_channels=1, kernel_size=[3,3,3], embeding_size=32, stride=2, padding=1, num_layers=4, num_heads=8, hidden_size=64, dropout=0.1):
+    def __init__(self, in_channels=1, kernel_size=[3,3,3], embeding_size=32, num_layers=4, num_heads=8, hidden_size=64, dropout=0.1):
         super(EEGTransformerEncoder, self).__init__()
-        self.conv_encoder = ConvEncoder(in_channels, kernel_size, embeding_size, stride, padding )
-        encoder_layers = TransformerEncoderLayer(embeding_size, num_heads, hidden_size, dropout, batch_first=True)
+        self.conv_encoder = ConvEncoder(in_channels, kernel_size, embeding_size )
+        encoder_layers = TransformerEncoderLayer(d_model=embeding_size, nhead=num_heads, dropout=0.1, dim_feedforward=hidden_size, batch_first=True, activation='gelu')
         self.transformer_encoder = TransformerEncoder(encoder_layers, num_layers)
-        self.positional_encoding = PositionalEncoding(embeding_size, max_len=1024,dropout=0)
+        #self.positional_encoding = PositionalEncoding(embeding_size, max_len=256,dropout=0)
 
-    def forward(self, x):
+
+    def time_permute(self, x):
+        #time shuffle
+        batch_size, seq_len, num_channels = x.size()
+        index_array = torch.zeros(batch_size, seq_len).to(x.device)
+        idx = np.random.choice(seq_len, 2, replace=False)
+        # exhange the two time points
+        x[:, idx[0], :], x[:, idx[1], :] = x[:, idx[1], :], x[:, idx[0], :]
+        index_array[idx] = 1
+        
+        return x, index_array
+
+    def forward(self, x, permute=False):
         x = self.conv_encoder(x)
         x = x.permute(0, 2, 1) # (batch, dim, time) -> (batch, time, dim)
+        if permute:
+            x, index_array = self.time_permute(x)
         #x = self.positional_encoding(x)
-        x = self.transformer_encoder(x)
-        return x
+            x = self.transformer_encoder(x)
+            return x, index_array 
+        else:
+            x = self.transformer_encoder(x)
+            return x
